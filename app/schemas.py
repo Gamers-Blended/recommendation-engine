@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from typing import Optional, List, Set
 from decimal import Decimal
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import Enum
 
 # ---------------------------------------------------------------------------
