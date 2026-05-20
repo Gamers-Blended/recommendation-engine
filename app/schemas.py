@@ -4,7 +4,9 @@ from decimal import Decimal
 from datetime import date, datetime
 from enum import Enum
 
-# --- Enums ---
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
 
 class SignalType(str, Enum):
     BROWSE = "BROWSE"
@@ -17,7 +19,9 @@ class UserSegment(str, Enum):
     RETURNING = "RETURNING"
     GUEST = "GUEST"
 
-# --- Recommendation schemas ---
+# ---------------------------------------------------------------------------
+# Recommendation Request / Response
+# ---------------------------------------------------------------------------
 
 class ProductSignal(BaseModel):
     product_id: str
@@ -32,7 +36,24 @@ class RecommendationRequest(BaseModel):
     user_segment: UserSegment
     max_results: int = Field(default=20, ge=1, le=100)
 
-# --- Product schemas ---
+class ProductRecommendation(BaseModel):
+    product_id: str
+    name: str
+    slug: str
+    platform: str
+    region: str
+    edition: str
+    price: Decimal
+    product_image_url: str
+
+class RecommendationResponse(BaseModel):
+    products: List[ProductRecommendation]
+    total: int
+    served_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+
+# ---------------------------------------------------------------------------
+# Product
+# ---------------------------------------------------------------------------
 
 class ProductBase(BaseModel):
     name: str
@@ -64,3 +85,6 @@ class ProductResponse(ProductBase):
     @field_serializer("price", "weight")
     def serialize_decimal(self, value: Decimal) -> str:
         return str(value)
+
+# Resolve forward reference in RecommendationResponse
+RecommendationResponse.model_rebuild()
