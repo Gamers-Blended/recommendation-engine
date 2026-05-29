@@ -20,6 +20,25 @@ services:
         aliases:
           - mongodb
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    networks:
+      app-network:
+        aliases:
+          - redis
+
   main-service:
     build: .
     ports:
@@ -28,7 +47,7 @@ services:
       - MONGO_URI=mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongodb:27017/${MONGO_DB_NAME}?authSource=admin
       - MONGO_DB_NAME=${MONGO_DB_NAME}
       - MONGO_COLLECTION_NAME=${MONGO_COLLECTION_NAME}
-      - MONGO_
+      - REDIS_URL=${REDIS_URL}
       - ENV=production
       - LOG_LEVEL=info
     depends_on:
@@ -41,15 +60,17 @@ services:
           memory: 512M
     restart: always
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
     networks:
       - app-network
 
 volumes:
   mongo_data:
+  redis-data:
 
 networks:
   app-network:
