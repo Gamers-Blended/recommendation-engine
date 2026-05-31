@@ -1,6 +1,7 @@
 import logging
 from typing import Any
-
+from bson import ObjectId
+from bson.errors import InvalidId
 from pymongo.asynchronous.database import AsyncDatabase
 
 from app.core.config import get_settings
@@ -18,15 +19,6 @@ def _map_doc_to_product(doc: dict[str, Any]) -> ProductResponse:
     """
     doc["_id"] = str(doc["_id"])
     return ProductResponse.model_validate(doc)
-
-    # return ProductResponse(
-    #     id=doc.get("_id"),
-    #     name=doc.get("name"),
-    #     description=doc.get("description"),
-    #     price=doc.get("price"),
-    #     category=doc.get("category"),
-    #     image_url=doc.get("image_url")
-    # )
 
 class ProductRepository:
     def __init__(self, db: AsyncDatabase) -> None:
@@ -47,8 +39,7 @@ class ProductRepository:
 
     async def get_products_by_id(
         self,
-        product_ids: list[str],
-        *,
+        product_id_list: list[str],
         preserve_order: bool = True,
         ) -> list[ProductResponse]:
 
@@ -58,32 +49,50 @@ class ProductRepository:
         preserver_order=True re-sorts results to match input order,
         since MongoDB does not guarantee order of results when using $in operator
         """
-        if not product_ids:
+        if not product_id_list:
             return []
         
-        from bson import ObjectId
-
-        # Silently skip any IDs that are not valid ObjectIds
+        # --- 1. Parse and validate ObjectIds ---
         object_ids: list[ObjectId] = []
-        for product_id in product_ids:
+        valid_str_ids: list[str] = [] # parallel list to preserve order mapping
+
+        for pid in product_id_list:
             try:
-                object_ids.append(ObjectId(product_id))
-            except Exception as e:
-                logger.warning(f"Skipping invalid product ID: {product_id} - {e}")
+                object_ids.append(ObjectId(pid))
+                valid_str_ids.append(pid)
+            except (InvalidId, TypeError):
+                logger.warning("Invalid ObjectId format, skipping: %s", pid)
+                # continue # skip malformed IDs rather than crashing
 
         if not object_ids:
+            logger.warning("No valid ObjectIds found in product_id_list: %s", product_id_list)
             return []
         
+        # --- 2. Query ---
         cursor = self._col.find(
-            {"_id": {"$in": object_ids}, "stock": {"$gt": 0}},  # Only return products that are in stock
+            {
+                "_id": {"$in": object_ids},
+                "stock": {"$gt": 0},  # Only return products that are in stock
+            }
         )
-        docs = await cursor.to_list(length=len(object_ids))
+        docs = await cursor.to_list(length=None)
+
+        if not docs:
+            logger.info(
+                "No in-stock products found for IDs: %s", valid_str_ids
+            )
+            return []
+        
+        # --- 3. Map to response models ---
         products = [_map_doc_to_product(doc) for doc in docs]
 
+        # --- 4. Preserve input order if requested ---
         if preserve_order:
-            # Create a mapping of product_id to product
-            product_map = {product.id: product for product in products}
-            # Reorder products to match the input order of product_ids
-            products = [product_map.get(product_id) for product_id in product_ids if product_id in product_map]
+            product_map: dict[str, ProductResponse] = {p.id: p for p in products}
+            products = [
+                product_map[pid]
+                for pid in valid_str_ids
+                if pid in product_map
+            ]
 
         return products
