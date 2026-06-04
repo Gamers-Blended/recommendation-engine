@@ -4,3 +4,5 @@ pymongo==4.11.1
 pydantic==2.7.0
 pydantic-settings==2.2.0
 redis==5.0.0
+numpy==2.4.0
+scikit-learn==1.6.0
