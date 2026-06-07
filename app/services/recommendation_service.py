@@ -27,6 +27,7 @@ settings = get_settings()
 _CACHE_KEY_VOCAB = "recommendation:catalogue:vocab"
 _CACHE_KEY_IDS = "recommendation:catalogue:ids"
 _CACHE_KEY_MATRIX = "recommendation:catalogue:matrix"
+_CACHE_KEY_DEDUP = "recommendation:catalogue:dedup"
 _CACHE_TTL_SECONDS = 3600
 
 _SIGNAL_WEIGHTS: dict[SignalType, float] = {
@@ -36,7 +37,7 @@ _SIGNAL_WEIGHTS: dict[SignalType, float] = {
     SignalType.BROWSE:    1.0,
 }
 
-async def _warm_catalogue_cache(repo: ProductRepository) -> tuple[dict[str, int], list[str], np.ndarray]:
+async def _warm_catalogue_cache(repo: ProductRepository) -> tuple[dict[str, int], list[str], np.ndarray, dict[str, tuple[str, str]]]:
     """
     Load catalogue vectors from Redis
     On miss, rebuild from MongoDB and repopulate cache
@@ -45,9 +46,10 @@ async def _warm_catalogue_cache(repo: ProductRepository) -> tuple[dict[str, int]
     vocab = await cache.get(_CACHE_KEY_VOCAB)
     ids = await cache.get(_CACHE_KEY_IDS)
     matrix = await cache.get(_CACHE_KEY_MATRIX)
+    dedup_keys = await cache.get(_CACHE_KEY_DEDUP)
 
-    if vocab is not None and ids is not None and matrix is not None:
-        return vocab, ids, matrix
+    if vocab is not None and ids is not None and matrix is not None and dedup_keys is not None:
+        return vocab, ids, matrix, dedup_keys
     
     logger.info("Catalogue cache miss, rebuilding from DB...")
     products = await repo.get_catalogue_for_indexing()
@@ -59,13 +61,19 @@ async def _warm_catalogue_cache(repo: ProductRepository) -> tuple[dict[str, int]
     )
     ids = [str(p["_id"]) for p in products]
 
-    # Cache all 3 components atomically
+    dedup_keys = {
+        str(doc["_id"]): (doc["slug"], doc["platform"])
+        for doc in products
+    }
+
+    # Cache all 4 components atomically
     await cache.set(_CACHE_KEY_VOCAB, vocab, ttl_seconds=_CACHE_TTL_SECONDS)
     await cache.set(_CACHE_KEY_IDS, ids, ttl_seconds=_CACHE_TTL_SECONDS)
     await cache.set(_CACHE_KEY_MATRIX, matrix, ttl_seconds=_CACHE_TTL_SECONDS)
+    await cache.set(_CACHE_KEY_DEDUP, dedup_keys, ttl_seconds=_CACHE_TTL_SECONDS)
 
     logger.info("Catalogue cached: %d products, vocab=%d", len(ids), len(vocab))
-    return vocab, ids, matrix
+    return vocab, ids, matrix, dedup_keys
 
 
 class RecommendationService:
@@ -98,7 +106,7 @@ class RecommendationService:
     ) -> RecommendationResponse:
         
         # ── 0. Load catalogue  ──────────────────────────────────────────
-        vocab, catalogue_ids, matrix = await _warm_catalogue_cache(self._repo)
+        vocab, catalogue_ids, matrix, dedup_keys = await _warm_catalogue_cache(self._repo)
 
         # ── 1. Fetch signal product docs (embedding fields only) ────────
         signal_docs = await self._repo.get_signal_product_vectors(request.product_id_list)
@@ -124,7 +132,9 @@ class RecommendationService:
         # ── 3-6. Similarity → rank → exclude → hydrate──────────────────
         sim_scores = cosine_similarity_matrix(query_vec.reshape(1, -1), matrix).flatten()
         purchased_ids = await self._get_purchased_ids(request)
-        top_ranked = rank_candidates(sim_scores, catalogue_ids, purchased_ids, request.max_results)
+
+        # Rank with larger pool to account for deduplication loss
+        top_ranked = rank_candidates(sim_scores, catalogue_ids, purchased_ids, request.max_results, dedup_keys=dedup_keys)
         
         if not top_ranked:
             logger.info("No candidates after ranking and exclusion")
@@ -132,7 +142,7 @@ class RecommendationService:
                 products=[],
                 total = 0
             )
-        
+                
         products = await self._repo.get_products_by_ids_ordered([pid for pid, _ in top_ranked])
 
         return RecommendationResponse(

@@ -67,6 +67,7 @@ def rank_candidates(
         candidate_ids: list[str],
         excluded_ids: set[str], # already-purchased products
         max_results: int,
+        dedup_keys: dict[str, tuple[str, str]] | None = None # id -> (slug, platform)
 ) -> list[tuple[str, float]]:
     """
     Filter excluded products, then return top-k by score
@@ -78,4 +79,20 @@ def rank_candidates(
         if cid not in excluded_ids
     ]
     scored.sort(key=lambda x: x[1], reverse=True)
-    return scored[:max_results]
+
+    if not dedup_keys:
+        return scored[:max_results]
+    
+    # Walk in rank order, skip seen slug+platform combinations until we have enough results
+    seen_combinations = set()
+    results = []
+    for cid, score in scored:
+        key = dedup_keys.get(cid)
+        if key is None or key not in seen_combinations:
+            if key:
+                seen_combinations.add(key)
+            results.append((cid, score))
+            if len(results) >= max_results:
+                break
+
+    return results
