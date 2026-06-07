@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from app.core.cache import close_cache, connect_cache
 from app.core.config import get_settings
 from app.core.database import connect_db, close_db
+from app.services.cache_keys import invalidate_catalogue_cache
 from app.routers import products
 
 logging.basicConfig(
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
     await connect_db()
     logger.info("Connecting to Redis...")
     await connect_cache()
+    await invalidate_catalogue_cache()
     logger.info("Ready.")
     yield
 
