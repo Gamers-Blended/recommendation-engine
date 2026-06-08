@@ -41,10 +41,14 @@ def build_query_vector(
 ) -> np.ndarray:
     """
     Aggregate signal products into a single weighted query vector
+
+    Weighting formula per signal:
+        final_weight = type_w * decay
     
-    signal["weight"] - user-supplied weight field from ProductSignal (1-10)
-    SIGNAL_WEIGHTS - type-based multiplier (PURCAHSE > CART_ADD > BROWSE)
-    time_decay() - recency multiplier
+    type_w   — SIGNAL_WEIGHTS multiplier (PURCHASE=3.0, CART_ADD/WISHLIST=2.0, BROWSE=1.0)
+    decay    — exponential time decay: e^(-λ * age_days), λ = ln(2) / HALF_LIFE_DAYS
+
+    Returns L2-normalised vector, or zero vector if all products are unknown.
     """
     from .embeddings import build_product_vector # avoid circular import
 
@@ -53,14 +57,15 @@ def build_query_vector(
     for sig in signals:
         product_vec = build_product_vector(sig["product"], vocab)
         type_w = SIGNAL_WEIGHTS.get(sig["type"], 1.0)
-        user_w = float(sig.get("weight", 1))
         decay = time_decay(sig["timestamp"])
-        agg += product_vec * type_w * user_w * decay
+        agg += product_vec * type_w * decay
 
     # Avoid zero vector (e.g. unknown products)
-    if np.linalg.norm(agg) == 0:
+    norm = np.linalg.norm(agg)
+    if norm == 0:
         return agg
-    return agg
+    
+    return agg / norm # L2-normalise so score = cosine similarity ∈ [–1, 1]
 
 def rank_candidates(
         similarity_scores: np.ndarray, # shape (N,)

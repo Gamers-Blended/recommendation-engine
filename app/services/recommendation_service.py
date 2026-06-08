@@ -30,12 +30,6 @@ _CACHE_KEY_MATRIX = "recommendation:catalogue:matrix"
 _CACHE_KEY_DEDUP = "recommendation:catalogue:dedup"
 _CACHE_TTL_SECONDS = 3600
 
-_SIGNAL_WEIGHTS: dict[SignalType, float] = {
-    SignalType.PURCHASE:  3.0,
-    SignalType.CART_ADD:  2.0,
-    SignalType.WISHLIST:  2.0,
-    SignalType.BROWSE:    1.0,
-}
 
 async def _warm_catalogue_cache(repo: ProductRepository) -> tuple[dict[str, int], list[str], np.ndarray, dict[str, tuple[str, str]]]:
     """
@@ -109,7 +103,8 @@ class RecommendationService:
         vocab, catalogue_ids, matrix, dedup_keys = await _warm_catalogue_cache(self._repo)
 
         # ── 1. Fetch signal product docs (embedding fields only) ────────
-        signal_docs = await self._repo.get_signal_product_vectors(request.product_id_list)
+        product_id_list = [sig.product_id for sig in request.signal_list]
+        signal_docs = await self._repo.get_signal_product_vectors(product_id_list)
 
         if not signal_docs:
             logger.info("No signal products resolved")
@@ -160,18 +155,22 @@ class RecommendationService:
             signal_docs: dict[str, dict[str, Any]]
     ) -> list[dict[str, Any]]:
         """
-        Map product_id_list to signal dicts consumed by build_query_vector
-        Defaults to BROWSE type since RecommendationRequest carries no signal metadata
+        Join request signals with their resolved product docs.
+        Skips signals whose product_id didn't resolve (unknown products).
         """
-        return [
-            {
+        result = []
+        for sig in request.signal_list:
+            doc = signal_docs.get(sig.product_id)
+            if doc is None:
+                logger.warning("Signal product_id %s not found in catalogue, skipping signal", sig.product_id)
+                continue
+            result.append({
                 "product": doc,
-                "type": SignalType.BROWSE.value,
-                "timestamp": datetime.now(tz=timezone.utc),
-                "weight": 1
-            }
-            for pid, doc in signal_docs.items()
-        ]
+                "type": sig.type,
+                "timestamp": sig.timestamp
+            })
+
+        return result
 
     async def _get_purchased_ids(self, request: RecommendationRequest) -> set[str]:
         if request.user_id:
