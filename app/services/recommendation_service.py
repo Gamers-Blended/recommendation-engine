@@ -18,6 +18,7 @@ from app.services.embeddings import (
     cosine_similarity_matrix
 )
 from app.services.scoring import build_query_vector, rank_candidates, SIGNAL_WEIGHTS
+from app.schemas import SignalType
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -74,7 +75,7 @@ class RecommendationService:
 
     Pre-process, deduplicate and score signals
     Delegate DB access to ProductRepository
-    Cache results at both best-sellers and per-user/session level
+    Returns fully-hydrated product recommendations sorted by relevance
     """
 
     def __init__(self, repo: ProductRepository) -> None:
@@ -124,9 +125,7 @@ class RecommendationService:
 
         # ── 3-6. Similarity → rank → exclude → hydrate──────────────────
         sim_scores = cosine_similarity_matrix(query_vec.reshape(1, -1), matrix).flatten()
-        purchased_ids = await self._get_purchased_ids(request)
-
-        # Rank with larger pool to account for deduplication loss
+        purchased_ids = self._get_purchased_ids(request)
         top_ranked = rank_candidates(sim_scores, catalogue_ids, purchased_ids, request.max_results, dedup_keys=dedup_keys)
         
         if not top_ranked:
@@ -177,10 +176,12 @@ class RecommendationService:
 
         return list(seen.values())
 
-    async def _get_purchased_ids(self, request: RecommendationRequest) -> set[str]:
-        if request.user_id:
-            return await self._repo.get_purchased_product_ids(request.user_id)
-        return set()
+    def _get_purchased_ids(self, request: RecommendationRequest) -> set[str]:
+        return {
+            sig.product_id
+            for sig in request.signal_list
+            if sig.type == SignalType.PURCHASE
+        }
     
     @staticmethod
     def _to_recommendation(p: Any) -> ProductRecommendation:

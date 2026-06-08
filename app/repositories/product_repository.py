@@ -100,18 +100,7 @@ class ProductRepository:
         return {str(doc["_id"]): doc for doc in docs}
     
     # ------------------------------------------------------------------
-    # 2. Purchased product IDs — exclusion list
-    # ------------------------------------------------------------------
-    async def get_purchased_product_ids(self, user_id: str) -> set[str]:
-        """
-        Return set of product IDs the user has already purchased
-        Excluded from recommendations
-        """
-        # TODO
-        return {}
-    
-    # ------------------------------------------------------------------
-    # 3. Full catalogue — for vector matrix (cache-warmed at startup)
+    # 2. Full catalogue — for vector matrix (cache-warmed at startup)
     # ------------------------------------------------------------------
     async def get_catalogue_for_indexing(self) -> list[dict[str, Any]]:
         """
@@ -123,24 +112,9 @@ class ProductRepository:
             {"series": 1, "genres": 1, "platform": 1, "slug": 1}
         )
         return await cursor.to_list(length=None)
-    
-    # ------------------------------------------------------------------
-    # 4. Deduplicate by slug+platform — keep highest-ranked product in each group
-    # ------------------------------------------------------------------
-    # async def dedup_candidates(
-    #     self,
-    #     ranked_candidate_ids: list[str],
-    #     max_results: int
-    # ) -> list[str]:
-    #     """
-    #     Returns deduplicated list of (product_id, score), sorted by score desc
-    #     """
-    #     object_ids, _ = _parse_object_ids(ranked_candidate_ids)
-    #     if not object_ids:
-    #         return []
         
     # ------------------------------------------------------------------
-    # 4. Full product docs for top-ranked results
+    # 3. Full product docs for top-ranked results
     # ------------------------------------------------------------------
     async def get_products_by_ids_ordered(
         self,
@@ -162,7 +136,7 @@ class ProductRepository:
         # --- 2. Preserve rank order as a lookup ---
         rank_order = {pid: idx for idx, pid in enumerate(valid_str_ids)}
         
-        # --- 2. Query and aggregate with deduplication by slug+platform ---
+        # --- 3. Query and aggregate with deduplication by slug+platform ---
 
         cursor = self._products.find(
             {
@@ -178,7 +152,7 @@ class ProductRepository:
             )
             return []
         
-        # --- 3. Map to response models ---
+        # --- 4. Map to response models ---
         products = [_map_doc_to_product(doc) for doc in docs]
         product_map = {p.id: p for p in products}
 
