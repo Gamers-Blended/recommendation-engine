@@ -24,8 +24,6 @@ class ProductSignal(BaseModel):
     timestamp: datetime
 
 class RecommendationRequest(BaseModel):
-    user_id: Optional[str] = None
-    session_id: str
     signal_list: List[ProductSignal]
     max_results: int = Field(default=20, ge=1, le=100)
 
