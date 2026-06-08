@@ -14,11 +14,6 @@ class SignalType(str, Enum):
     CART_ADD = "CART_ADD"
     WISHLIST = "WISHLIST"
 
-class UserSegment(str, Enum):
-    NEW = "NEW"
-    RETURNING = "RETURNING"
-    GUEST = "GUEST"
-
 # ---------------------------------------------------------------------------
 # Recommendation Request / Response
 # ---------------------------------------------------------------------------
@@ -33,14 +28,12 @@ class ProductSignal(BaseModel):
 #     user_id: Optional[str] = None
 #     session_id: str
 #     signal_list: List[ProductSignal]
-#     user_segment: UserSegment
 #     max_results: int = Field(default=20, ge=1, le=100)
 
 class RecommendationRequest(BaseModel):
     user_id: Optional[str] = None
     session_id: str
     product_id_list: List[str]
-    user_segment: UserSegment
     max_results: int = Field(default=20, ge=1, le=100)
 
 class ProductRecommendation(BaseModel):
