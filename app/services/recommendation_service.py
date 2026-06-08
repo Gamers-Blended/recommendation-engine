@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -11,15 +10,14 @@ from app.schemas import (
     ProductResponse,
     ProductRecommendation,
     RecommendationRequest,
-    RecommendationResponse,
-    SignalType,
+    RecommendationResponse
 )
 from app.services.embeddings import (
     build_vocab,
     build_product_vector,
     cosine_similarity_matrix
 )
-from app.services.scoring import build_query_vector, rank_candidates
+from app.services.scoring import build_query_vector, rank_candidates, SIGNAL_WEIGHTS
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -170,7 +168,14 @@ class RecommendationService:
                 "timestamp": sig.timestamp
             })
 
-        return result
+        # Keep only the highest-weight signal per product to avoid over-counting duplicates
+        seen: dict[str, dict] = {}
+        for entry in result:
+            pid = entry["product"]["_id"]
+            if pid not in seen or SIGNAL_WEIGHTS[entry["type"]] > SIGNAL_WEIGHTS[seen[pid]["type"]]:
+                seen[pid] = entry
+
+        return list(seen.values())
 
     async def _get_purchased_ids(self, request: RecommendationRequest) -> set[str]:
         if request.user_id:
